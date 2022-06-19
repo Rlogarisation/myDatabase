@@ -1,0 +1,282 @@
+
+
+Q1:
+
+
+1. Find the student zId from student database.
+
+CREATE TABLE People (
+    id INTEGER PRIMARY KEY, --zID
+    family LongName,
+    given LongName NOT NULL,
+    fullname LongName NOT NULL,
+    birthday DATE,
+    origin INTEGER REFERENCES Countries(id)
+);
+
+2. Need to check the input zId is a student.
+Need to implement a before event trigger.
+Updated: it has been implemented in helper function.
+
+-- simply indicates that a person is also a student
+CREATE TABLE Students (
+    id INTEGER REFERENCES People(id),
+	PRIMARY KEY (id)
+);
+
+3. Link the student and current enrolled course thro course_enrolments.
+
+CREATE TABLE course_enrolments (
+    student INTEGER NOT NULL,
+    course INTEGER NOT NULL,
+    mark INTEGER CHECK (mark BETWEEN 0 AND 100),
+    grade GradeType,
+	PRIMARY KEY (student,course)
+);
+
+4. Now we have obtained the course id,
+we need to connect course id with its actual subject id, and terms thro courses.
+
+-- subject offerings
+CREATE TABLE Courses (
+    id INTEGER PRIMARY KEY,
+    subject INTEGER REFERENCES Subjects(id),
+    term INTEGER REFERENCES Terms(id),
+    homepage UrlString
+);
+
+5. Now we got subject id, we need to convert it into UNSW style course code thro subjects.
+
+CREATE TABLE Subjects (
+    id INTEGER PRIMARY KEY,
+    code CHAR(8) NOT NULL,
+    name MediumName NOT NULL,
+    LongName LongName,
+    uoc INTEGER CHECK (uoc >= 0),
+    offeredby INTEGER REFERENCES OrgUnits(id),
+    eftsload DOUBLE PRECISION,
+    career CareerType,
+    syllabus text
+);
+
+6. Eventually we got term's id, we need to convert to term code thro terms. 
+
+CREATE TABLE Terms (
+    id INTEGER PRIMARY KEY,
+    YEAR CourseYearType NOT NULL,
+    ttype TermType NOT NULL,
+	code  CHAR(4) NOT NULL,
+    name ShortName NOT NULL,
+    starting DATE NOT NULL,
+    ending DATE NOT NULL
+);
+
+7. Implement first order requirement: 
+"Entries should be ordered by term, and within the same term, by course code."
+
+Solution so far:
+select s.code, t.code as term, s.name, ce.mark, ce.grade, s.uoc
+from people ppl
+join course_enrolments ce on ppl.id = ce.student
+join courses c on ce.course = c.id
+join subjects s on c.subject = s.id
+join terms t on c.term = t.id
+where ppl.id = 5123999
+order by t.code, s.code;
+
+8. I need to create a function in sql in order to produce transcriptRecord type.
+
+create or replace function
+	transcript(_zid integer) 
+	returns setof transcriptrecord
+as $$
+declare 
+	r transcriptrecord;
+begin 
+	for r in 
+		select s.code, t.code as term, s.name, ce.mark as mark, ce.grade, s.uoc
+		from people ppl
+		join course_enrolments ce on ppl.id = ce.student
+		join courses c on ce.course = c.id
+		join subjects s on c.subject = s.id
+		join terms t on c.term = t.id
+		where ppl.id = _zid
+		order by t.code, s.code
+	loop
+		if (r.mark is Null) then
+			r.mark := 0;
+		end if;
+		return next r;
+	end loop;
+	return;
+end;
+$$ language plpgsql;
+
+
+9. Calculate WAM at the end of the page: WAM = Sum(Mark*UOC) / TotalUOC
+
+
+---------------------------------------------------------------------------------------
+
+Q2:
+
+Program Part:
+1. Translate the rules.id into program id thro program_rules.
+
+CREATE TABLE Rules (
+    id INTEGER PRIMARY KEY,
+    name MediumName,
+    TYPE RuleType NOT NULL,
+    min_uoc INTEGER CHECK (min_uoc >= 0),
+    max_uoc INTEGER CHECK (max_uoc >= 0),
+    ao_group INTEGER REFERENCES Academic_object_groups(id),
+    description text
+);
+
+
+CREATE TABLE program_rules (
+    program INTEGER REFERENCES Programs(id),
+    rule INTEGER REFERENCES Rules(id),
+	PRIMARY KEY (program,rule)
+);
+
+2. Convert r.ao_group id into academic object group.
+
+CREATE TABLE Academic_object_groups (
+    id INTEGER PRIMARY KEY,
+    name LongName,
+    TYPE AcadObjGroupType NOT NULL,
+    defby AcadObjGroupDefType NOT NULL,
+    parent INTEGER REFERENCES Academic_object_groups(id),
+    definition text
+);
+
+3. Add a detailed program name through programs.
+
+CREATE TABLE Programs (
+    id INTEGER PRIMARY KEY,
+    code CHAR(4) NOT NULL,
+    name LongName NOT NULL,
+    uoc INTEGER,
+    offeredby INTEGER,
+    career CareerType,
+    duration INTEGER,
+    description text,
+    CONSTRAINT programs_uoc_check CHECK ((uoc >= 0))
+);
+
+
+
+select r.name, r.type, r.min_req, r.max_req, aog.type, aog.defby, aog.definition
+from rules r
+join program_rules pr on r.id = pr.rule
+join programs p on p.id = pr.program
+join academic_object_groups aog on r.ao_group = aog.id
+where pr.program = 3778;
+
+
+---------------------------------------------------------------------------------------
+Stream part:
+
+1. Get all the streams from streams.
+CREATE TABLE Streams (
+    id INTEGER PRIMARY KEY,
+    code CHAR(6) NOT NULL,
+    name LongName NOT NULL,
+    offeredby INTEGER REFERENCES OrgUnits(id),
+    stype INTEGER REFERENCES stream_types(id),
+    description text
+);
+
+2. Combine streams with stream_rules thro stream rules.
+
+CREATE TABLE stream_rules (
+    stream INTEGER REFERENCES Streams(id),
+    rule INTEGER REFERENCES Rules(id),
+    PRIMARY KEY (stream,rule)
+);
+
+3. Combine stream rule with rules.
+
+CREATE TABLE Rules (
+    id INTEGER PRIMARY KEY,
+    name MediumName,
+    TYPE RuleType NOT NULL,
+    min_uoc INTEGER CHECK (min_uoc >= 0),
+    max_uoc INTEGER CHECK (max_uoc >= 0),
+    ao_group INTEGER REFERENCES Academic_object_groups(id),
+    description text
+);
+
+4. translate ao_group id into academic object group.
+
+CREATE TABLE Academic_object_groups (
+    id INTEGER PRIMARY KEY,
+    name LongName,
+    TYPE AcadObjGroupType NOT NULL,
+    defby AcadObjGroupDefType NOT NULL,
+    parent INTEGER REFERENCES Academic_object_groups(id),
+    definition text
+); 
+
+
+select r.name, r.type, r.min_req, r.max_req, aog.type, aog.defby, aog.definition
+from streams s
+join stream_rules sr on s.id = sr.stream
+join rules r on sr.rule = r.id
+join academic_object_groups aog on r.ao_group = aog.id
+where s.id = 2;
+
+
+
+---------------------------------------------------------------------------------------
+
+Q3:
+
+1. Find the student zId from student database.
+
+CREATE TABLE People (
+    id INTEGER PRIMARY KEY, --zID
+    family LongName,
+    given LongName NOT NULL,
+    fullname LongName NOT NULL,
+    birthday DATE,
+    origin INTEGER REFERENCES Countries(id)
+);
+
+2. Find student's most recent enrolment term if no program/stream is given.
+
+CREATE TABLE program_enrolments (
+    id INTEGER PRIMARY KEY,
+    student INTEGER NOT NULL REFERENCES Students(id),
+    term INTEGER NOT NULL REFERENCES Terms(id),
+    program INTEGER NOT NULL REFERENCES Programs(id),
+    wam REAL,
+    standing INTEGER REFERENCES academic_standing(id),
+    advisor INTEGER REFERENCES Staff(id),
+    notes text
+);
+
+ 
+CREATE TABLE stream_enrolments (
+    partof INTEGER NOT NULL REFERENCES program_enrolments(id),
+    stream INTEGER NOT NULL REFERENCES Streams(id)
+);
+
+(The first one is the latest term)
+
+select pe.program, s.code
+from program_enrolments pe
+join stream_enrolments se on se.partof = pe.id
+join streams s on se.stream = s.id
+where pe.student = 5197273
+order by pe.term;
+
+
+
+
+
+
+select p.fullname, 
+from people p
+

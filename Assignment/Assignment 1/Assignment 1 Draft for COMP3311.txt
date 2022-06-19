@@ -1,0 +1,236 @@
+Q1:
+select name as "oldest brewery" from breweries where (founded = (select min(founded) from breweries));
+
+
+Q2:
+
+select beers.name
+from brewed_by join beers on brewed_by.beer = beers.id
+group by brewed_by.beer, beers.name
+having count(brewed_by.beer)>1
+order by brewed_by.beer;
+
+
+
+Q3:
+select b.name, b.rating from beers b group by b.name,b.rating order by b.rating;
+
+select b.name from beers b group by b.name, b.rating having b.rating <= 1;
+
+
+Q4:
+select b.name, b.abv, s.name, s.max_abv 
+from beers b, styles s
+where b.style = s.id
+and 
+b.abv > s.max_abv;
+
+Q5:
+Hazy IPA 259 17
+Pale Ale 238 58
+
+
+select styles.name, count(beers.style)
+from beers join styles on beers.style = styles.id
+group by styles.name, beers.style
+order by count(beers.style) desc;
+
+select style
+from q5sub
+group by style, count
+having count = (select max(count) from q5sub);
+
+Q6:
+select a.name, b.name
+from styles a, styles b
+where lower(a.name) = lower(b.name) and a.name != b.name and a.name < b.name;
+
+Q7:
+select by.brewery, b.name, by.beer, count(by.brewery)
+from brewed_by by right outer join breweries b on (by.brewery = b.id)
+group by by.brewery, b.id, by.beer
+order by by.brewery desc;
+
+select name
+from q7sub
+where count = 0;
+
+Q8:
+select * from locations;
+
+create view q8sub(metro, country, count) as 
+select metro, country, count(metro) from locations
+group by metro, country
+order by count(metro) desc;
+
+create view q8(city, country) as
+select metro, country 
+from q8sub
+where count = (select max(count) from q8sub);
+
+Q9:
+select by.beer, by.brewery, b.style 
+from brewed_by by join beers b
+on (by.beer = b.id);
+
+select breweries.name, count(distinct beers.style)
+from brewed_by join beers on (brewed_by.beer = beers.id)
+join 
+breweries on (brewed_by.brewery = breweries.id)
+group by breweries.name
+having count(distinct beers.style) > 5
+order by breweries.name;
+
+Q10:
+create view q10sub(beer, brewery, style, year, abv) as 
+select beers.name as beer, breweries.name as brewery, styles.name as style, beers.brewed as year, beers.abv as abv 
+from beers join brewed_by on beers.id = brewed_by.beer
+join breweries on brewed_by.brewery = breweries.id
+join styles on styles.id = beers.style
+order by beers.name asc, breweries.name asc;
+
+create type BeerInfo as 
+(beer text, brewery text, style text, year YearValue, abv ABVvalue);
+
+
+create or replace function
+	q10(_style text)
+	RETURNS setof BeerInfo
+AS $$
+declare
+	r BeerInfo;
+begin
+	for r in
+		select beer, string_agg(brewery, ' + '), style, year, abv
+		from q10sub
+		group by beer, style, year, abv 
+        	having style = _style
+	loop
+		return next r;
+	end loop;
+	return; 
+end;
+$$ LANGUAGE plpgsql;
+
+
+Q11:
+select beers.name as beer, breweries.name as brewery, styles.name as style, beers.abv as abv 
+from beers join brewed_by on beers.id = brewed_by.beer
+join breweries on brewed_by.brewery = breweries.id
+join styles on styles.id = beers.style
+
+
+create or replace function
+	q11(partial_name text)
+	returns setof text
+AS $$
+declare
+	r record;
+	_res text := '';
+begin
+	for r in
+		select beer, string_agg(brewery, ' + ') as brewery, style, year, abv
+        	from q10sub
+        	group by beer, style, year, abv 
+        	having beer ilike concat('%', partial_name, '%')
+		order by beer, brewery
+	loop
+		_res := concat('"', r.beer,'", ', r.brewery, ', ', r.style, ', ', r.abv, '% ABV');
+        	return next _res;
+	end loop;
+	return; 
+end;
+$$ LANGUAGE plpgsql;
+
+
+
+Q12:
+select breweries.name as brewery, breweries.founded as founded, locations.town as town, locations.metro as metro, locations.region as region, locations.country as country, beers.name as beer, styles.name as style, beers.brewed as brewed, beers.ABV as abv
+from breweries join locations on breweries.located_in = locations.id
+join brewed_by on brewed_by.brewery = breweries.id
+join beers on beers.id = brewed_by.beer
+join styles on beers.style = styles.id
+order by breweries.name;
+
+
+
+
+
+
+
+create or replace function
+	q12(partial_name text)
+	returns setof text
+AS $$
+declare
+	r record;
+	b record;
+	locationInfo1 text;
+	locationInfo2 text;
+	_brewery_counter integer := 0;
+	_beer_counter integer := 0;
+begin
+	select count(name) into  _brewery_counter
+    	from breweries 
+    	where name ilike concat('%', partial_name,'%');
+
+	if _brewery_counter = 0 then
+		return; 
+	end if;
+
+	for r in
+		select breweries.name as brewery, breweries.founded as founded, locations.town as town, locations.metro as metro, locations.region as region, locations.country as country
+		from breweries join locations on breweries.located_in = locations.id
+        	where breweries.name ilike concat('%', partial_name,'%')
+		order by breweries.name
+	loop
+		locationInfo1 := null;
+		locationInfo2 := null;
+
+		if (r.town is not null and r.metro is not null) or (r.town is not null and r.metro is null) then
+			locationInfo1 := r.town || ', ';
+		elsif r.town is null and r.metro is not null then
+			locationInfo1 := r.metro || ', ';
+		end if;
+
+		if r.region is not null then
+			locationInfo2 := r.region || ', ';
+		end if;
+
+		return next 	r.brewery || ', founded ' ||
+				r.founded;
+
+		return next 	concat('located in ', 
+				locationInfo1,
+				locationInfo2,
+				r.country);
+
+		select count(brewed_by.beer) into _beer_counter
+		from breweries join brewed_by on brewed_by.brewery = breweries.id
+		where breweries.name = r.brewery;
+
+		if _beer_counter = 0 then
+			return next '  No known beers';
+		end if;
+
+		for b in 
+			select be.name as name, s.name as style, be.brewed as year, be.ABV as abv
+            		from breweries br 
+            		join brewed_by bb on (br.id = bb.brewery)
+            		join beers be on (be.id = bb.beer)
+            		join styles s on (be.style = s.id)
+            		where br.name = r.brewery
+            		order by be.brewed asc, be.name
+
+		loop
+			return next 	'  ' || '"' || b.name || '", ' || 
+					b.style || ', ' || 
+					b.year || ', ' ||
+					b.abv || '% ABV';
+		end loop;
+		
+	end loop;
+	return; 
+end;
+$$ LANGUAGE plpgsql;
+

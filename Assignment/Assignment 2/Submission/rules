@@ -1,0 +1,84 @@
+#!/usr/bin/python3
+# COMP3311 21T3 Ass2 ... print list of rules for a program or stream
+
+import sys
+import psycopg2
+import re
+from helpers import getOfferbySchool, getProgram, getRulesForProgram, getRulesForStream, getStream
+
+# define any local helper functions here
+# ...
+
+### set up some globals
+
+usage = f"Usage: {sys.argv[0]} (ProgramCode|StreamCode)"
+db = None
+
+### process command-line args
+
+argc = len(sys.argv)
+if argc < 2:
+  print(usage)
+  exit(1)
+code = sys.argv[1]
+if len(code) == 4:
+  codeOf = "program"
+elif len(code) == 6:
+  codeOf = "stream"
+
+try:
+  db = psycopg2.connect("dbname=mymyunsw")
+  if codeOf == "program":
+    progInfo = getProgram(db,code)
+    if not progInfo:
+      print(f"Invalid program code {code}")
+      exit()
+    (progId, progCode, progName, progUoc, progOfferbyId, progCareer, progDurationMonth, progDescription) = progInfo
+    # Convert the program offerby id into string.
+    schoolInfo = getOfferbySchool(db, progOfferbyId)
+    if not schoolInfo:
+      print(f"Invalid school code {progOfferbyId}")
+      exit()
+    (schoolId, schoolUtype, schoolName, schoolLongName, schoolUnswId) = schoolInfo
+    # List the rules for Program
+    print(f"{progId} {progName}, {progUoc} UOC, {progDurationMonth/12.0} years")
+    print(f"- offered by {schoolLongName}")
+    print("Academic Requirements:")
+
+    progRules = getRulesForProgram(db, progId, 0)
+    if not progRules:
+      print(f"Invalid program id {progId}")
+      exit()
+    print(progRules)
+
+
+  elif codeOf == "stream":
+    strmInfo = getStream(db,code)
+    if not strmInfo:
+      print(f"Invalid stream code {code}")
+      exit()
+    # decompose strmInfo
+    (streamId, streamCode, streamName, streamOfferby, streamStype, streamDes) = strmInfo
+    # Convert the program offerby id into string.
+    schoolInfo = getOfferbySchool(db, streamOfferby)
+    if not schoolInfo:
+      print(f"Invalid school code {streamOfferby}")
+      exit()
+    (schoolId, schoolUtype, schoolName, schoolLongName, schoolUnswId) = schoolInfo
+    # Print out the rules for stream
+    print(f"{streamCode} {streamName}")
+    print(f"- offered by {schoolLongName}")
+    print("Academic Requirements:")
+
+    streamRules = getRulesForStream(db, streamId, 0)
+    if not streamRules:
+      print(f"Invalid stream id {streamId}")
+      exit()
+    print(streamRules, end = '')
+    
+
+except Exception as err:
+  print(err)
+finally:
+  if db:
+    db.close()

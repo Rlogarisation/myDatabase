@@ -1,0 +1,87 @@
+#!/usr/bin/python3
+# COMP3311 21T3 Ass2 ... progression check for a given student
+
+import sys
+import psycopg2
+import re
+from helpers import *
+
+# define any local helper functions here
+
+### set up some globals
+
+usage = f"Usage: {sys.argv[0]} zID [Program Stream]"
+db = None
+
+### process command-line args
+
+argc = len(sys.argv)
+if argc < 2:
+  print(usage)
+  exit(1)
+zid = sys.argv[1]
+if zid[0] == 'z':
+  zid = zid[1:8]
+digits = re.compile("^\d{7}$")
+if not digits.match(zid):
+  print("Invalid student ID")
+  exit(1)
+
+progCode = None
+strmCode = None
+
+if argc == 4:
+  progCode = sys.argv[2]
+  strmCode = sys.argv[3]
+  
+
+
+# manipulate database
+
+try:
+  db = psycopg2.connect("dbname=mymyunsw")
+  stuInfo = getStudent(db,zid)
+  if not stuInfo:
+    print(f"Invalid student id {zid}")
+    exit()
+  # Decomposite student's information.
+  (stuId, stuFamilyName, stuGivenName, stuFullName, stuBirthday, stuOriginId, stuCountry) = stuInfo
+  # If no program/stream is given, 
+  # use the program/stream for the student's most recent enrolment term.
+  if (progCode is None and strmCode is None):
+    (progCode, strmCode) = getRecentEnrolledProgramStreamByStuId(db, stuId)
+
+  if progCode:
+    progInfo = getProgram(db,progCode)
+    if not progInfo:
+      print(f"Invalid program code {progCode}")
+      exit()
+    (progId, progCode, progName, progUoc, progOfferbyId, progCareer, progDurationMonth, progDescription) = progInfo
+    progInfo = getRulesForProgram(db, progId, 1)
+  if strmCode:
+    strmInfo = getStream(db,strmCode)
+    if not strmInfo:
+      print(f"Invalid program code {strmCode}")
+      exit()
+    (streamId, streamCode, streamName, streamOfferby, streamStype, streamDes) = strmInfo
+    streamInfo = getRulesForStream(db, streamId, 1)
+
+    rulesInfo = arrangeStreamProgramInfos(streamInfo, progInfo)
+  # if have a program/stream
+  #   show progression check on supplied program/stream
+  # else
+  #   show progression check on most recent program/stream enrolment
+  # ... add your code here ...
+  print(f"{stuId} {stuFamilyName}, {stuGivenName}")
+  print(f"  {progId} {progName}")
+  print(f"  {streamCode} {streamName}\n")
+  print(getTranscriptForProgression(db, zid, rulesInfo), end = '')
+  
+
+
+except Exception as err:
+  print("DB error: ", err)
+finally:
+  if db:
+    db.close()
+
